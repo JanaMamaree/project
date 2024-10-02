@@ -1,0 +1,96 @@
+import json
+import boto3
+import logging
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+s3_client = boto3.client('s3')
+iot_client = boto3.client('iot-data')
+sns = boto3.client('sns')
+
+sns_topic_arn = 'arn:aws:sns:eu-north-1:654654391281:my_email'
+
+def lambda_handler(event, context):
+    try:
+        # Log received event
+        logger.info('Received event: %s', event)
+        
+        # Parse the 'body' JSON string to a dictionary
+        body_dict = json.loads(event['body'])
+        
+        # Extract command from the body dictionary
+        command = body_dict.get('command')
+        if command is None:
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({'error': 'No command provided in the request body'})
+            }
+        
+        # Log command
+        logger.info('Received command: %s', command)
+        
+        # Determine the bucket name based on the command
+        bucket_name = 'door-stat' if command in ['0', '1'] else 'light-stat'
+        
+        try:
+            # Read the existing value from the text file in the appropriate bucket
+            response = s3_client.get_object(Bucket=bucket_name, Key='status.txt')
+            existing_value = response['Body'].read().decode('utf-8').strip()
+            response['Body'].close()  # Explicitly close the response body
+        except s3_client.exceptions.NoSuchKey:
+            logger.warning('status.txt not found in bucket %s. Initializing with empty value.', bucket_name)
+            existing_value = ""
+        
+        # Compare the existing value with the received command
+        if existing_value == command:
+            # If the existing value is the same as the received command, no need to update
+            logger.info('Received command is the same as the existing value. No update needed.')
+        else:
+            # Update the text file with the received command
+            s3_client.put_object(Bucket=bucket_name, Key='status.txt', Body=command)
+            logger.info('Updated value in %s bucket to %s', bucket_name, command)
+            
+        # Publish the command to AWS IoT topic
+        iot_client.publish(
+        topic='esp32/sub',  # Specify the topic your ESP32 is subscribed to
+        qos=1,
+        payload=json.dumps({'message': command})
+        )
+        logger.info('Published command to AWS IoT topic: %s', command)
+            
+        # Determine SNS message based on the command
+        if command == '0':
+            sns_message = 'The door has been successfully closed'
+        elif command == '1':
+            sns_message = 'The door has been successfully opened'
+        elif command == '2':
+            sns_message = 'The light has been turned on successfully'
+        elif command == '3':
+            sns_message = 'The light has been turned off successfully'
+        else:
+            sns_message = None
+
+        if sns_message:
+            # Publish SNS message
+            sns.publish(
+            TopicArn=sns_topic_arn,
+            Message=sns_message
+            )
+            logger.info('Published SNS notification: %s', sns_message)
+  
+        # Return success response
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'message': 'Command processed successfully'})
+        }
+
+    except Exception as e:
+        logger.error('Error: %s', e, exc_info=True)
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'error': str(e)})
+        }

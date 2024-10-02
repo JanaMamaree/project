@@ -1,0 +1,96 @@
+import json
+import boto3
+import urllib3
+
+s3_client = boto3.client('s3')
+http = urllib3.PoolManager()
+
+def lambda_handler(event, context):
+    try:
+        # Parse JSON string to dictionary
+        body_dict = json.loads(event['body'])
+        recognized_text = body_dict.get('voice', '').strip()
+        
+        if not recognized_text:
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({'error': 'No recognized text provided'})
+            }
+        
+        # List all objects in the S3 bucket
+        bucket_name = 'actuatehome'
+        file_contents = []
+        continuation_token = None
+
+        while True:
+            if continuation_token:
+                response = s3_client.list_objects_v2(Bucket=bucket_name, ContinuationToken=continuation_token)
+            else:
+                response = s3_client.list_objects_v2(Bucket=bucket_name)
+
+            if 'Contents' not in response:
+                return {
+                    'statusCode': 404,
+                    'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps({'error': 'No files found in the bucket'})
+                }
+
+            # Retrieve data from S3
+            for obj in response['Contents']:
+                file_key = obj['Key']
+                s3_response = s3_client.get_object(Bucket=bucket_name, Key=file_key)
+                file_contents.append(s3_response['Body'].read().decode('utf-8').strip())
+
+            if response.get('IsTruncated'):  # More objects to retrieve
+                continuation_token = response.get('NextContinuationToken')
+            else:
+                break
+
+        # Compare all file contents
+        is_equal = any(recognized_text.lower() == content.lower() for content in file_contents)
+        
+        # Initialize command to None
+        command = None
+        
+        # Determine the command based on recognized text
+        commands = {
+            "open the door": "1",
+            "close the door": "0",
+            "turn on the light": "2",
+            "turn off the light": "3"
+        }
+        
+        command_value = commands.get(recognized_text.lower())
+        if command_value is not None:
+            command = {'command': command_value}
+        
+        # If command is determined, send it to Lambda 2
+        if command:
+            try:
+                http.request(
+                    'POST', 
+                    'https://ygtr269b54.execute-api.eu-north-1.amazonaws.com/test/toLambda2', 
+                    body=json.dumps(command), 
+                    headers={'Content-Type': 'application/json'}
+                )
+                print(f"Sent command {command['command']} to Lambda2")
+            except Exception as http_err:
+                return {
+                    'statusCode': 500,
+                    'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps({'error': 'Failed to send command to Lambda2', 'details': str(http_err)})
+                }
+            
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'is_equal': is_equal})
+        }
+
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'error': str(e)})
+        }

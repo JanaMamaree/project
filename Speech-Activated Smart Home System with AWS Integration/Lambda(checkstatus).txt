@@ -1,0 +1,82 @@
+import json
+import boto3
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError
+
+s3 = boto3.client('s3')
+
+def lambda_handler(event, context):
+    print("Received event: ", json.dumps(event))  # Log the incoming event
+    
+    # Parse the body
+    try:
+        body = json.loads(event['body'])
+    except (json.JSONDecodeError, TypeError):
+        return {
+            'statusCode': 400,
+            'body': json.dumps('Invalid JSON in request body')
+        }
+    
+    command = body.get('item')
+    if not command:
+        return {
+            'statusCode': 400,
+            'body': json.dumps('Missing "item" in the request')
+        }
+    
+    bucket_name = ''
+    file_key = 'status.txt' 
+    
+    if command == 'door':
+        bucket_name = 'door-stat'
+    elif command == 'light':
+        bucket_name = 'light-stat'
+    else:
+        return {
+            'statusCode': 400,
+            'body': json.dumps('Invalid item. Must be "door" or "light".')
+        }
+    
+    try:
+        response = s3.get_object(Bucket=bucket_name, Key=file_key)
+        status = response['Body'].read().decode('utf-8').strip()
+    except s3.exceptions.NoSuchKey:
+        return {
+            'statusCode': 404,
+            'body': json.dumps(f'Status file not found in bucket {bucket_name}')
+        }
+    except (NoCredentialsError, PartialCredentialsError):
+        return {
+            'statusCode': 403,
+            'body': json.dumps('Credentials not available or incomplete.')
+        }
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'body': json.dumps(f'Error retrieving status from bucket: {str(e)}')
+        }
+    
+    if command == 'door':
+        if status == '0':
+            status_message = 'closed'
+        elif status == '1':
+            status_message = 'open'
+        else:
+            return {
+                'statusCode': 500,
+                'body': json.dumps('Invalid status value for door.')
+            }
+    elif command == 'light':
+        if status == '2':
+            status_message = 'turned on'
+        elif status == '3':
+            status_message = 'turned off'
+        else:
+            return {
+                'statusCode': 500,
+                'body': json.dumps('Invalid status value for light.')
+            }
+    
+    return {
+        'statusCode': 200,
+        'body': json.dumps({'status': status_message})
+    }
