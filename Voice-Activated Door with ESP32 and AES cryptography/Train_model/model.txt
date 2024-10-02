@@ -1,0 +1,68 @@
+import os
+import soundfile as sf
+import numpy as np
+from python_speech_features import mfcc
+from sklearn.model_selection import train_test_split
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import accuracy_score
+import pickle
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+
+def extract_features(file_name):
+    try:
+        # choose only WAV format
+        if file_name.lower().endswith(".wav"):
+            # Extract MFCC features from the audio
+            audio, sample_rate = sf.read(file_name)
+            nfft = 2048 if sample_rate * 0.025 > 512 else 512
+            mfccs = mfcc(audio, samplerate=sample_rate, numcep=40, nfft=nfft)
+            mfccs_processed = np.mean(mfccs, axis=0)
+            return mfccs_processed
+    except Exception as e:
+        print("Error encountered while processing file: ", file_name)
+        return np.zeros(40)  # Return a default feature vector of zeros
+
+
+# Specify your actual file paths and labels
+authorized_folder = "authorized"
+unauthorized_folder = "unauthorized"
+
+authorized_files = [f"{authorized_folder}/{file}" for file in os.listdir(authorized_folder)]
+unauthorized_files = [f"{unauthorized_folder}/{file}" for file in os.listdir(unauthorized_folder)]
+
+file_paths = authorized_files + unauthorized_files
+labels = [1] * len(authorized_files) + [0] * len(unauthorized_files)
+
+# Extract features from audio files
+max_length = 200
+features = [extract_features(file) for file in file_paths]
+
+
+# Filter out None values and their corresponding labels
+non_none_indices = [i for i, f in enumerate(features) if f is not None]
+features = [features[i] for i in non_none_indices]
+labels = [labels[i] for i in non_none_indices]
+
+# Pad/truncate the remaining features to a fixed length
+features = pad_sequences(features, maxlen=max_length, padding='post', truncating='post', dtype='float32')
+
+
+
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.2)
+
+# Define and train MLP model
+model = MLPClassifier(hidden_layer_sizes=(10,), max_iter=50, learning_rate_init=0.01)
+model.fit(X_train, y_train)
+
+# Pickle the trained model for later use
+with open('trained_model.pkl', 'wb') as file:
+    pickle.dump(model, file)
+
+# Predict and evaluate on the test set
+predictions = model.predict(X_test)
+for i in range(len(predictions)):
+    print(f"Sample {i}: Predicted {predictions[i]}, Actual {y_test[i]}")
+accuracy = accuracy_score(y_test, predictions)
+print(f'Accuracy: {accuracy}')

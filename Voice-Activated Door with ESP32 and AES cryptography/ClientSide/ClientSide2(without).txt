@@ -1,0 +1,134 @@
+import socket
+import pyttsx3
+import time
+import speech_recognition as sr
+import soundfile as sf
+import numpy as np
+from python_speech_features import mfcc
+from sklearn.neural_network import MLPClassifier
+import pickle
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from base64 import urlsafe_b64encode, urlsafe_b64decode
+import secrets
+import getpass
+
+# Replace 'YOUR_SECRET_KEY' with a secure key for AES encryption
+SECRET_KEY = bytes.fromhex("d4998ae740fde3a7db122cbb4f16b8f83c0f29596b3ef70870e7d5376792c1e6")
+
+
+# Generate nonce once
+nonce = b'\x03:\xd4(\xc1\xa3\x1ct\xa8Z\x98\xda'
+
+def encrypt_data(data):
+    aesgcm = AESGCM(SECRET_KEY)
+    ciphertext = aesgcm.encrypt(nonce, data.encode('utf-8'), None)
+    print ("Ciphertext: ", ciphertext)
+    return urlsafe_b64encode(nonce + ciphertext).decode('utf-8')
+    
+
+def decrypt_data(encrypted_data):
+    aesgcm = AESGCM(SECRET_KEY)
+    encrypted_bytes = urlsafe_b64decode(encrypted_data.encode('utf-8'))
+    nonce = encrypted_bytes[:12]
+    ciphertext = encrypted_bytes[12:]
+    return aesgcm.decrypt(nonce, ciphertext, None).decode('utf-8')
+
+def extract_features(file_name, expected_features=200):
+    try:
+        # choose only WAV format
+        if file_name.lower().endswith(".wav"):
+            # Extract MFCC features from the audio
+            audio, sample_rate = sf.read(file_name)
+            nfft = 2048 if sample_rate * 0.025 > 512 else 512
+            mfccs = mfcc(audio, samplerate=sample_rate, numcep=40, nfft=nfft)
+            mfccs_processed = np.mean(mfccs, axis=0)
+
+            # Pad or truncate features to match the expected number
+            if len(mfccs_processed) < expected_features:
+                mfccs_processed = np.pad(mfccs_processed, (0, expected_features - len(mfccs_processed)))
+            else:
+                mfccs_processed = mfccs_processed[:expected_features]
+
+            return mfccs_processed
+    except Exception as e:
+        print("Error encountered while processing file: ", file_name)
+        return np.zeros(expected_features)  # Return a default feature vector of zeros
+
+
+def execute_command(command):
+    # Connect to the ESP32
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect(("192.168.137.111", 1444))
+    encrypted_command = encrypt_data(command)
+    print ("Encrypted command: ", encrypted_command)
+    s.sendall(encrypted_command.encode('utf-8'))
+    s.close()
+
+def speak(text):
+    engine = pyttsx3.init()
+    engine.say(text)
+    engine.runAndWait()
+
+def get_password():
+    password = getpass.getpass("Please enter the password: ")
+    return password.lower()
+
+def main():
+    recognizer = sr.Recognizer()
+    loaded_model = None
+
+    # Load the trained model
+    with open('trained_model.pkl', 'rb') as file:
+        loaded_model = pickle.load(file)
+
+    speak("Hey, how can i help you")
+
+    while True:
+        if(True):
+            with sr.Microphone() as source:
+                print("Say something:")
+                audio = recognizer.listen(source)	
+            try:
+                # Recognize speech using Google Speech Recognition
+                command = recognizer.recognize_google(audio).lower()
+
+                if(True):
+                    if "open the door" in command:
+                        print("You said:", command)
+                        speak("Ok, what's the password?")
+                        entered_password = get_password()
+
+                        if entered_password == "51830345":
+                            speak("Password is correct, opening the door..")
+                            execute_command('1')
+                            print("Door opened")
+                            
+                            
+                        else:
+                            speak("Password is not correct")
+                            print("Password is not correct")
+
+                    elif "close the door" in command:
+                        print("You said:", command)
+                        speak("Ok, what's the password?")
+                        entered_password = get_password()
+
+                        if entered_password == "51830345":
+                            speak("Password is correct, closing the door..")
+                            execute_command('0')
+                            print("Door closed")
+                            
+                        else:
+                            speak("Password is not correct")
+                            print("Password is not correct")
+
+
+            except sr.UnknownValueError:
+                print("Could not understand audio")
+            except sr.RequestError as e:
+                print(f"Error with the speech recognition service; {e}")
+
+   
+
+if __name__ == "__main__":
+    main()
