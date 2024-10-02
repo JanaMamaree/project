@@ -1,0 +1,18 @@
+--> sim-code:
+optimal-placement.py: i used the optimal controller placement algorithm for the scalability of the multi-controller network
+primary-backup-rep.py: for the consistency
+heartbeat.py: for the reliability 
+robin-round.py: for load-balancing
+
+--> test-cases:
+ocp-test-cases.py: this code evaluates different scenarios for optimizing controller placement in a network.
+pbr-test-cases.py: this code simulates failover and data synchronization processes in a primary-backup controller system.
+rr-test-cases.py: this script simulates round-robin load balancing in a Mininet network and evaluates its efficiency under different scenarios
+
+--> graph-code: 
+ocp-graph.py: 
+pbr-graph.py: 
+hm-graph.py: 
+rr-graph.py:
+each of them creates charts to visualize test scenario results
+
